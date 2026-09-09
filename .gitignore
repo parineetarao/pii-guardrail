@@ -13,7 +13,8 @@ venv/
 # Model files
 *.pth
 *.bin
-/models/
+/models/*.pth
+/models/*.bin
 
 # Environment
 .env
@@ -22,6 +23,5 @@ __pycache__/
 *.pyc
 .ipynb_checkpoints/
 /data/raw/
-/models/
 
 models/*.pkl

@@ -1,0 +1,34 @@
+{
+  "total": 310,
+  "exact_match": "95.2%",
+  "clean_passthrough": "100.0%",
+  "pii_replacement": "93.6%",
+  "rag_accuracy": "92.9%",
+  "per_category": {
+    "EMAIL": "100.0%",
+    "PHONE": "98.7%",
+    "AADHAAR": "96.2%",
+    "PAN": "100.0%",
+    "API_KEY": "95.8%",
+    "PERSON": "97.3%",
+    "CREDIT_CARD": "100.0%",
+    "DB_CREDENTIAL": "91.3%"
+  },
+  "latency_mean_ms": "4137",
+  "latency_p95_ms": "11008",
+  "false_positives": 0,
+  "false_negatives": 1,
+  "partial_failures": 14,
+  "failure_analysis": {
+    "false_positives": 0,
+    "false_negatives": 1,
+    "partial_replacements": 14
+  },
+  "notes": {
+    "training": "Qwen2.5-1.5B-Instruct, LoRA r=16, 2 epochs, fp16, Kaggle T4",
+    "dataset": "1239 train / 310 test, 8 PII categories",
+    "task": "PII pseudonymization - rewrite text replacing sensitive values with typed placeholders",
+    "db_credential_note": "Lowest category accuracy 91.3% - model occasionally confuses password-only credentials with API keys when no URI context present",
+    "clean_passthrough_note": "100% - model correctly returns clean text completely unchanged, zero false positives"
+  }
+}

@@ -6,6 +6,20 @@
 venv/
 .ipynb_checkpoints/
 *.csv
-*.json
+# Data files (too large / contain PII)
+/data/raw/
+*.csv
+
+# Model files
+*.pth
+*.bin
+/models/
+
+# Environment
+.env
+venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
 /data/raw/
 /models/

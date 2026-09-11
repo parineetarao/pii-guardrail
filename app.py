@@ -1,25 +1,8 @@
-"""
-PII Guardrail — Gradio Demo
-Live demo of the fine-tuned Qwen2.5-1.5B PII pseudonymizer.
-Hosted on Hugging Face Spaces with ZeroGPU.
-"""
-
 import gradio as gr
 import torch
 import re
-from transformers import AutoTokenizer, AutoModelForCausalLM
-from peft import PeftModel
-import spaces  # add this after the other imports
-
-# Add this decorator above the predict function:
-@spaces.GPU
-def predict(text):
-    load_model()
-    # ... rest of function unchanged
-
-# ── Load model ────────────────────────────────────────────────────────
-MODEL_NAME   = "Qwen/Qwen2.5-1.5B-Instruct"
-ADAPTER_REPO = "parineeta8/pii-guardrail-adapter"
+import spaces
+from typing import Optional
 
 SYSTEM_PROMPT = """You are a PII redaction system.
 Your job: rewrite the input text replacing all PII and sensitive credentials with typed placeholder tags.
@@ -30,31 +13,51 @@ Rules:
 - If there is no PII or sensitive data, return the text COMPLETELY UNCHANGED
 - Do not add explanations. Output only the rewritten text."""
 
-tokenizer = None
-model     = None
+MODEL_NAME   = "Qwen/Qwen2.5-1.5B-Instruct"
+ADAPTER_REPO = "parineeta8/pii-guardrail-adapter"
 
-def load_model():
-    global tokenizer, model
-    if model is not None:
-        return
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
-    base = AutoModelForCausalLM.from_pretrained(
-        MODEL_NAME,
-        torch_dtype=torch.float16,
-        device_map="auto",
-        trust_remote_code=True,
+# Load model at module level — outside any function
+print("Loading tokenizer...")
+from transformers import AutoTokenizer
+tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
+print("Tokenizer loaded")
+
+print("Loading base model...")
+from transformers import AutoModelForCausalLM
+base_model = AutoModelForCausalLM.from_pretrained(
+    MODEL_NAME,
+    torch_dtype=torch.float16,
+    device_map="cpu",          # load on CPU first
+    trust_remote_code=True,
+)
+print("Base model loaded")
+
+print("Loading adapter...")
+from peft import PeftModel
+model = PeftModel.from_pretrained(base_model, ADAPTER_REPO)
+model.eval()
+print("Adapter loaded — ready")
+
+
+@spaces.GPU
+def sanitize(user_query: str, rag_context: str) -> tuple[str, str]:
+    """Run inference on GPU via ZeroGPU."""
+    if not user_query.strip():
+        return "Please enter some text.", ""
+
+    full_text = (
+        f"{user_query}\n\n[RETRIEVED CONTEXT]: {rag_context}"
+        if rag_context.strip() else user_query
     )
-    model = PeftModel.from_pretrained(base, ADAPTER_REPO)
-    model.eval()
 
-def predict(text):
-    load_model()
     prompt = (
         f"<|im_start|>system\n{SYSTEM_PROMPT}<|im_end|>\n"
-        f"<|im_start|>user\n{text}<|im_end|>\n"
+        f"<|im_start|>user\n{full_text}<|im_end|>\n"
         f"<|im_start|>assistant\n"
     )
+
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+
     with torch.no_grad():
         outputs = model.generate(
             **inputs,
@@ -63,26 +66,16 @@ def predict(text):
             pad_token_id=tokenizer.pad_token_id,
             eos_token_id=tokenizer.convert_tokens_to_ids("<|im_end|>"),
         )
+
     new_tokens = outputs[0][inputs["input_ids"].shape[1]:]
-    return tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
-
-def sanitize(user_query, rag_context):
-    if not user_query.strip():
-        return "Please enter some text.", "{}"
-
-    full_text = (
-        f"{user_query}\n\n[RETRIEVED CONTEXT]: {rag_context}"
-        if rag_context.strip() else user_query
-    )
-
-    result = predict(full_text)
+    result = tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
 
     # Extract mapping
     pattern = re.compile(
         r'(PERSON|EMAIL|PHONE|AADHAAR|PAN|CREDIT_CARD|API_KEY|DB_CREDENTIAL)_(\d{3})'
     )
     placeholders = set(f"{c}_{n}" for c, n in pattern.findall(result))
-    mapping = {p: "[ original value — stored privately, never sent to LLM ]"
+    mapping = {p: "[ original value — stored privately ]"
                for p in sorted(placeholders)}
 
     import json
@@ -90,7 +83,8 @@ def sanitize(user_query, rag_context):
 
     return result, mapping_str
 
-# ── Example inputs ────────────────────────────────────────────────────
+
+# ── Examples ──────────────────────────────────────────────────────────
 examples = [
     [
         "Who should I contact for payroll issues?",
@@ -114,21 +108,20 @@ examples = [
     ],
 ]
 
-# ── Gradio UI ─────────────────────────────────────────────────────────
+# ── UI ────────────────────────────────────────────────────────────────
 with gr.Blocks(
     title="PII Guardrail",
     theme=gr.themes.Soft(),
-    css=".gradio-container { max-width: 900px; margin: auto; }"
 ) as demo:
 
     gr.Markdown("""
     # 🛡️ PII Guardrail for RAG Systems
-    
+
     **Fine-tuned Qwen2.5-1.5B** that pseudonymizes PII and sensitive credentials
     before they reach external LLM APIs.
-    
+
     Detects: `PERSON` · `EMAIL` · `PHONE` · `AADHAAR` · `PAN` · `CREDIT_CARD` · `API_KEY` · `DB_CREDENTIAL`
-    
+
     Enter a user query and optional RAG-retrieved context below.
     The guardrail sits **after context assembly, before the external LLM call**.
     """)
@@ -169,11 +162,11 @@ with gr.Blocks(
     ---
     **How it works:**
     - Stage 1: Fine-tuned Qwen replaces sensitive values with typed placeholders
-    - Stage 2: Naive Bayes router (not shown here) classifies query complexity
+    - Stage 2: Naive Bayes router classifies query complexity (simple/complex)
     - The private mapping is stored locally — the external LLM never sees real values
-    
-    [GitHub](https://github.com/parineetarao/pii-guardrail) · 
-    Built by Parineetha Rao · K.J. Somaiya Institute of Technology
+
+    [GitHub](https://github.com/parineetarao/pii-guardrail) ·
+    Built by Parineeta Rao · K.J. Somaiya Institute of Technology
     """)
 
     submit_btn.click(

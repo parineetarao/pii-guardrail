@@ -9,6 +9,13 @@ import torch
 import re
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from peft import PeftModel
+import spaces  # add this after the other imports
+
+# Add this decorator above the predict function:
+@spaces.GPU
+def predict(text):
+    load_model()
+    # ... rest of function unchanged
 
 # ── Load model ────────────────────────────────────────────────────────
 MODEL_NAME   = "Qwen/Qwen2.5-1.5B-Instruct"
@@ -175,4 +182,4 @@ with gr.Blocks(
         outputs=[sanitized_output, mapping_output],
     )
 
-demo.launch()
+demo.launch(show_error=True)

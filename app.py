@@ -2,6 +2,7 @@ import gradio as gr
 import torch
 import re
 import spaces
+import json
 from typing import Optional
 
 SYSTEM_PROMPT = """You are a PII redaction system.
@@ -16,34 +17,38 @@ Rules:
 MODEL_NAME   = "Qwen/Qwen2.5-1.5B-Instruct"
 ADAPTER_REPO = "parineeta8/pii-guardrail-adapter"
 
-# Load model at module level — outside any function
-print("Loading tokenizer...")
-from transformers import AutoTokenizer
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
-print("Tokenizer loaded")
-
-print("Loading base model...")
-from transformers import AutoModelForCausalLM
-base_model = AutoModelForCausalLM.from_pretrained(
-    MODEL_NAME,
-    torch_dtype=torch.float16,
-    device_map="cpu",          # load on CPU first
-    trust_remote_code=True,
-)
-print("Base model loaded")
-
-print("Loading adapter...")
-from peft import PeftModel
-model = PeftModel.from_pretrained(base_model, ADAPTER_REPO)
-model.eval()
-print("Adapter loaded — ready")
+# Global references — populated on first GPU call
+tokenizer = None
+model     = None
 
 
-@spaces.GPU
-def sanitize(user_query: str, rag_context: str) -> tuple[str, str]:
-    """Run inference on GPU via ZeroGPU."""
+def load_model():
+    global tokenizer, model
+    if model is not None:
+        return
+
+    from transformers import AutoTokenizer, AutoModelForCausalLM
+    from peft import PeftModel
+
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
+
+    base = AutoModelForCausalLM.from_pretrained(
+        MODEL_NAME,
+        torch_dtype=torch.float16,
+        device_map="auto",
+        trust_remote_code=True,
+    )
+
+    model = PeftModel.from_pretrained(base, ADAPTER_REPO)
+    model.eval()
+
+
+@spaces.GPU(duration=120)
+def sanitize(user_query: str, rag_context: str):
     if not user_query.strip():
         return "Please enter some text.", ""
+
+    load_model()
 
     full_text = (
         f"{user_query}\n\n[RETRIEVED CONTEXT]: {rag_context}"
@@ -70,7 +75,6 @@ def sanitize(user_query: str, rag_context: str) -> tuple[str, str]:
     new_tokens = outputs[0][inputs["input_ids"].shape[1]:]
     result = tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
 
-    # Extract mapping
     pattern = re.compile(
         r'(PERSON|EMAIL|PHONE|AADHAAR|PAN|CREDIT_CARD|API_KEY|DB_CREDENTIAL)_(\d{3})'
     )
@@ -78,41 +82,23 @@ def sanitize(user_query: str, rag_context: str) -> tuple[str, str]:
     mapping = {p: "[ original value — stored privately ]"
                for p in sorted(placeholders)}
 
-    import json
     mapping_str = json.dumps(mapping, indent=2) if mapping else "{  (no PII detected)  }"
-
     return result, mapping_str
 
 
-# ── Examples ──────────────────────────────────────────────────────────
 examples = [
-    [
-        "Who should I contact for payroll issues?",
-        "For payroll queries contact Priya Sharma at priya.sharma@company.com or call +91 98765 43210."
-    ],
-    [
-        "Was any credential exposed in the incident?",
-        "Post-incident analysis found misconfigured S3 exposed DATABASE_URL=postgres://admin:PASS123@db.internal:5432/prod and API_KEY=SYNTH_EXPOSED_KEY_9Km."
-    ],
-    [
-        "Verify the customer KYC details.",
-        "Customer Amit Kumar, Aadhaar 3456 7890 1234, PAN AMTKM5678K, phone 9823456710, email amit.kumar@gmail.com."
-    ],
-    [
-        "What is the company work from home policy?",
-        ""
-    ],
-    [
-        "Who approved the Q3 budget?",
-        "The Q3 data infrastructure budget was approved by Vikram Nair (vikram.nair@company.com, PAN VKRNR1234F) on 15 July."
-    ],
+    ["Who should I contact for payroll issues?",
+     "For payroll queries contact Priya Sharma at priya.sharma@company.com or call +91 98765 43210."],
+    ["Was any credential exposed in the incident?",
+     "Post-incident analysis found misconfigured S3 exposed DATABASE_URL=postgres://admin:PASS123@db.internal:5432/prod and API_KEY=SYNTH_EXPOSED_KEY_9Km."],
+    ["Verify the customer KYC details.",
+     "Customer Amit Kumar, Aadhaar 3456 7890 1234, PAN AMTKM5678K, phone 9823456710, email amit.kumar@gmail.com."],
+    ["What is the company work from home policy?", ""],
+    ["Who approved the Q3 budget?",
+     "The Q3 budget was approved by Vikram Nair (vikram.nair@company.com, PAN VKRNR1234F) on 15 July."],
 ]
 
-# ── UI ────────────────────────────────────────────────────────────────
-with gr.Blocks(
-    title="PII Guardrail",
-    theme=gr.themes.Soft(),
-) as demo:
+with gr.Blocks(title="PII Guardrail", theme=gr.themes.Soft()) as demo:
 
     gr.Markdown("""
     # 🛡️ PII Guardrail for RAG Systems
@@ -124,6 +110,8 @@ with gr.Blocks(
 
     Enter a user query and optional RAG-retrieved context below.
     The guardrail sits **after context assembly, before the external LLM call**.
+    
+    > ⏱️ First request takes ~30 seconds to load the model. Subsequent requests are faster.
     """)
 
     with gr.Row():

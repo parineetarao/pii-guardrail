@@ -163,4 +163,4 @@ with gr.Blocks(title="PII Guardrail", theme=gr.themes.Soft()) as demo:
         outputs=[sanitized_output, mapping_output],
     )
 
-demo.launch(show_error=True)
+demo.launch(server_name="0.0.0.0", server_port=7860, show_error=True)

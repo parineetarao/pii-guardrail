@@ -166,7 +166,7 @@ with gr.Blocks(
     - The private mapping is stored locally — the external LLM never sees real values
     
     [GitHub](https://github.com/parineetarao/pii-guardrail) · 
-    Built by Parineetha Rao · K.J. Somaiya Institute of Technology
+    Built by Parineeta Rao · K.J. Somaiya Institute of Technology
     """)
 
     submit_btn.click(

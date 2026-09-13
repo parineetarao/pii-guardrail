@@ -1,5 +1,6 @@
-﻿transformers==4.40.0
-peft==0.14.0
-accelerate==0.29.3
+﻿fastapi==0.111.0
+uvicorn==0.30.0
+pydantic==2.7.0
 scikit-learn==1.7.2
-huggingface_hub
+groq
+httpx

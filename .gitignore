@@ -1,27 +1,6 @@
-﻿__pycache__/
-*.pyc
-*.pth
-*.bin
+﻿gemini_url.txt
+run.py
+.n8n/
+*.pkl
+*.json
 .env
-venv/
-.ipynb_checkpoints/
-*.csv
-# Data files (too large / contain PII)
-/data/raw/
-*.csv
-
-# Model files
-*.pth
-*.bin
-/models/*.pth
-/models/*.bin
-
-# Environment
-.env
-venv/
-__pycache__/
-*.pyc
-.ipynb_checkpoints/
-/data/raw/
-
-models/*.pkl
